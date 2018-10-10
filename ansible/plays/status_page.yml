@@ -1,0 +1,8 @@
+---
+- name: status_page play start
+  hosts: all
+  become: true
+  become_method: sudo
+
+  roles:
+    - status_page

@@ -1,0 +1,86 @@
+---
+#####################################################
+# This is a really nasty hack to make it such that 
+# curl can authenticate and get a valid cookie. 
+# Without this, you'll get a CSFR token validation
+# failed when trying to post _token, username, and 
+# password to the /auth/login request URL.
+#####################################################
+
+- name: Replace exception line in VerifyCsrfToken.php
+  lineinfile:
+    dest: /var/www/Cachet/vendor/laravel/framework/src/Illuminate/Foundation/Http/Middleware/VerifyCsrfToken.php
+    regexp: '    protected \$except = \[\];'
+    line: "    protected $except = [\n        'setup*',\n        '/auth/login*',    ];"
+    backrefs: yes
+  register: csrf_protected
+  tags:
+    - setup
+
+- name: Get lines for debug output
+  command: grep -B 1 -A 6 "The URIs that should be excluded from CSRF verification" /var/www/Cachet/vendor/laravel/framework/src/Illuminate/Foundation/Http/Middleware/VerifyCsrfToken.php
+  register: csrf_status
+  changed_when: csrf_protected is changed
+  tags:
+    - setup
+
+- debug:
+    msg: "{{ csrf_status.stdout_lines }}"
+  when: csrf_protected is changed
+  tags:
+    - setup
+
+# bootstrap cache is always the problem
+
+- name: Remove and add bootstrap cache folder
+  file:
+    state: "{{ item }}"
+    path: "/var/www/Cachet/bootstrap/cache"
+    owner: apache
+    group: apache
+  with_items:
+    - absent
+    - directory
+  when: csrf_protected is changed
+  tags:
+    - setup
+
+- name: PHP artisan app update
+  become: true
+  command: php artisan app:update
+  changed_when: false
+  args:
+    chdir: /var/www/Cachet
+  when: csrf_protected is changed
+  tags:
+    - setup
+
+- name: Check if forwarding to setup page
+  uri:
+    url: http://localhost:80
+    method: GET
+    body_format: json
+  register: json_response
+  tags:
+    - setup
+
+- name: Submit Setup Data
+  uri:
+    url: http://localhost:80/setup/step3
+    method: POST
+    body_format: form-urlencoded
+    body: "env[cache_driver]={{ env_cache_driver }}&env[session_driver]={{ env_session_driver }}&env[mail_driver]={{ env_mail_driver }}&env[mail_host]={{ env_mail_host }}&env[mail_address]={{ env_mail_address }}&env[mail_username]={{ env_mail_username }}&env[mail_password]={{ env_mail_password }}&settings[app_name]={{ settings_app_name }}&settings[app_domain]={{ settings_app_domain }}&settings[app_timezone]={{ settings_app_timezone }}&settings[app_locale]={{ settings_app_locale }}&settings[show_support]={{ settings_show_support }}&user[username]={{ user_username }}&user[email]={{ user_email }}&user[password]={{ user_password }}&settings[app_incident_days]={{ settings_app_incident_days }}"
+    status_code: 302
+  register: login
+  when: json_response.redirected
+  tags:
+    - setup
+
+- name: PHP artisan app update
+  become: true
+  command: php artisan app:update
+  changed_when: false
+  args:
+    chdir: /var/www/Cachet
+  tags:
+    - setup

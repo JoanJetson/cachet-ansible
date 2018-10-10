@@ -1,0 +1,18 @@
+---
+- name: Restart httpd
+  shell: systemctl restart httpd.service
+  # when: ansible_connection == 'docker'
+
+- name: Restart firewalld
+  shell: systemctl restart firewalld.service
+  # when: ansible_connection == 'docker'
+
+- name: restart postgresql
+  shell: systemctl restart postgresql.service
+  # when: ansible_connection == 'docker'
+
+- name: PHP artisan app update
+  become: true
+  command: php artisan app:update
+  args:
+    chdir: /var/www/Cachet

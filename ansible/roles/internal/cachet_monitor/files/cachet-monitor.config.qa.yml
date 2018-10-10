@@ -1,0 +1,25 @@
+# api:
+#   # cachet url
+#   url: http://CACHETHOSTNAME/api/v1
+#   # cachet api token
+#   token: TOKENNOTSET
+#   insecure: true
+# # https://golang.org/src/time/format.go#L57
+# date_format: 02/01/2006 15:04:05 MST
+# monitors:
+#   - name: example name
+#     target: http://exampleurl.com
+#     strict: false
+#     method: GET
+#     component_id: 19
+#     metric_id: 19
+#     template:
+#       investigating:
+#         subject: "{{ .Monitor.Name }} - {{ .SystemName }}"
+#         message: "{{ .Monitor.Name }} check **failed** (server time: {{ .now }})\n\n{{ .FailReason }}"
+#       fixed:
+#         subject: "I HAVE BEEN FIXED"
+#     interval: 1
+#     timeout: 1
+#     threshold: 80
+#     expected_status_code: 200

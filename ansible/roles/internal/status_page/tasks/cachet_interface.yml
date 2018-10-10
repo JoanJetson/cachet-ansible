@@ -1,0 +1,76 @@
+---
+- name: Insert App Banner
+  become: true
+  command: psql -c "INSERT into settings (name, value, created_at, updated_at ) select 'app_banner', '{{ banner_image }}', '2018-09-07 23:12:08', '2018-09-07 23:12:08' where not exists (select * from settings where name = 'app_banner')" -d cachet_data -U postgres
+  register: insert_banner
+  changed_when: insert_banner.stdout != "INSERT 0 0"
+
+- name: Display query result
+  debug:
+    msg: "{{ insert_banner.stdout }}"
+
+- name: Insert App Banner Type
+  become: true
+  command: psql -c "INSERT into settings (name, value, created_at, updated_at ) select 'app_banner_type', 'image/png', '2018-09-07 23:12:08', '2018-09-07 23:12:08' where not exists ( select * from settings where name = 'app_banner_type' )" -d cachet_data -U postgres
+  register: insert_banner_type
+  changed_when: insert_banner_type.stdout != "INSERT 0 0"
+
+- name: Register custom css
+  command: cat /etc/ansible/roles/internal/status_page/files/custom.css
+  register: custom_css
+
+- name: Set facts for Change stylesheet
+  set_fact:
+    date: "{{ ansible_date_time.date }} {{ ansible_date_time.time}}"
+    table: "settings"
+    name: "stylesheet"
+    value: "{{ custom_css.stdout }}"
+
+- name: PSQL - Change stylesheet settings
+  become: true
+  command: >-
+    psql -c "INSERT into {{ table }}
+    (name,value,created_at,updated_at) select
+    '{{ name }}','{{ value }}','{{ date }}','{{ date }}'
+    where not exists ( select name from {{ table }} where name = '{{ name }}' )" -d cachet_data -U postgres
+  register: query_result
+  changed_when: query_result.stdout != "INSERT 0 0"
+
+- name: Display query result
+  debug:
+    msg: "{{ query_result.stdout }}"
+
+- name: Set facts for Change display_graphs
+  set_fact:
+    date: "{{ ansible_date_time.date }} {{ ansible_date_time.time}}"
+    table: "settings"
+    name: "display_graphs"
+    value: "1"
+
+- name: Check facts
+  debug:
+    msg:
+      - "Date: {{ date }}"
+      - "Table: {{ table }}"
+      - "Name: {{ name }}"
+
+- name: PSQL - Change display_graphs settings
+  become: true
+  command: >-
+    psql -c "INSERT into {{ table }}
+    (name,value,created_at,updated_at) select
+    '{{ name }}','{{ value }}','{{ date }}','{{ date }}'
+    where not exists ( select name from {{ table }} where name = '{{ name }}' )" -d cachet_data -U postgres
+  register: query_result
+  changed_when: query_result.stdout != "INSERT 0 0"
+
+- name: Display query result
+  debug:
+    msg: "{{ query_result.stdout }}"
+
+- name: PHP artisan app update
+  become: true
+  command: php artisan app:update
+  changed_when: false
+  args:
+    chdir: /var/www/Cachet

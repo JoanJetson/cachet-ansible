@@ -1,0 +1,313 @@
+---
+- name: Upgrade all packages
+  yum:
+    name: '*'
+    state: latest
+  tags:
+    - base
+
+- name: Install packages
+  become: true
+  yum:
+    name: "{{ item }}"
+  with_items:
+    - vim
+    - git
+    - unzip
+    - httpd
+    - telnet
+    - openssl
+    - memcached
+    - zlib-devel
+    - epel-release
+    - libsemanage-python
+    - https://mirror.webtatic.com/yum/el7/webtatic-release.rpm
+  register: packages
+  tags:
+    - packages
+    - base
+
+- name: Install PHP packages
+  become: true
+  yum:
+    name: "{{ item }}"
+    enablerepo: webtatic,epel
+  with_items:
+    - php71w
+    - php71w-gd
+    - php71w-cli
+    - php71w-dom
+    - php71w-xml
+    - php71w-mysql
+    - php71w-mcrypt
+    - php71w-openssl
+    - php71w-mbstring
+    - php71w-tokenizer
+    - php71w-simplexml
+    - php71w-pecl-memcached
+  register: php_packages
+  tags:
+    - packages
+    - base
+
+- name: Install PostgreSQL
+  become: true
+  yum:
+    name: "{{ item }}"
+    update_cache: true
+  with_items:
+    - postgresql
+    - postgresql-server
+    - postgresql-contrib
+    - postgresql-libs
+    - python-psycopg2
+    - php71w-pgsql
+  register: db_packages
+  tags:
+    - packages
+    - base
+
+################################################################################
+# selinux must be disabled
+################################################################################
+
+- name: Disable selinux
+  selinux:
+    state: disabled
+  register: selinux
+  notify:
+    - reboot the system
+    - waiting for server to come back
+  ignore_errors: true
+  tags:
+    - base
+
+- debug:
+    msg:
+      - "Selinux has been disabled"
+      - "Reboot required for change to take effect"
+      - "Ansible will attempt to reconnect after reboot"
+      - "If reconnect is unsucessful, rerun ansible"
+  when: selinux is changed
+  ignore_errors: true
+  tags:
+    - base
+
+- name: Reboot the system
+  shell: sleep 2 && shutdown -r now "Ansible updates triggered"
+  async: 1
+  poll: 0
+  become: yes
+  ignore_errors: true
+  when: selinux is changed
+  tags:
+    - base
+
+- name: Wait for server to come back
+  wait_for:
+    port: "{{ ansible_ssh_port | default(22) }}"
+    host: "{{ ansible_ssh_host | default(inventory_hostname) }}"
+    state: started
+    delay: 10
+    timeout: 60
+  delegate_to: localhost
+  become: no
+  when: selinux is changed
+  ignore_errors: true
+  tags:
+    - base
+
+################################################################################
+# If you want to use mariadb/MySQL. uncomment the stuff with the mariadb tags
+# and comment out all the stuff with the postgres tag.
+# I guess now is as good of a time as ever to mention that you need to get the 
+# file env_pgsql or env_mariadb copied over to /tmp/ and just name it env. 
+# In the future, I should just update the code to copy both over and then 
+# decide in the ansible which should be used
+################################################################################
+
+# - name: Install MySQL/mariadb
+#   become: true
+#   yum:
+#     name: "{{ item }}"
+#     update_cache: true
+#   with_items:
+#     - mariadb-server
+#     - mariadb
+#     - MySQL-python
+#   register: db_packages
+#   tags:
+#     - packages
+#     - mariadb
+
+- name: Upgrade all packages
+  yum:
+    name: '*'
+    state: latest
+  when: >
+    packages is changed
+    or php_packages is changed
+    or db_packages is changed
+  tags:
+    - base
+
+- name: Enable services and ensure not masked
+  become: true
+  systemd:
+    name: "{{ item }}"
+    enabled: yes
+    masked: no
+  with_items:
+    - httpd
+    - memcached
+  ignore_errors: true
+  register: enableservices
+  tags:
+    - base
+
+- name: Enable services with systemctl
+  shell: systemctl enable {{ item }}
+  when: enableservices is failed
+  with_items:
+    - httpd
+    - memcached
+  tags:
+    - base
+
+- name: Start services
+  become: true
+  service:
+    name: "{{ item }}"
+    state: started
+  with_items:
+    - httpd.service
+    - memcached
+  tags:
+    - base
+  ignore_errors: true
+  register: startservices
+
+- name: Start services with systemctl
+  shell: systemctl start {{ item }}.service
+  when: startservices is failed
+  with_items:
+    - httpd
+    - memcached
+  tags:
+    - base
+
+- name: Check if composer installed
+  command: which /usr/local/bin/composer
+  register: composer
+  changed_when: composer.stdout == ""
+  failed_when: false
+  tags:
+    - composer
+    - base
+
+- name: Download composer
+  get_url:
+    url: https://getcomposer.org/installer
+    dest: "/tmp/installer.php"
+  when: composer.stdout == ""
+  tags:
+    - composer
+    - base
+
+- name: Install composer
+  command: "{{ item }}"
+  with_items:
+    - "php /tmp/installer.php"
+    - mv composer.phar /usr/local/bin/composer
+  when: composer.stdout == ""
+  tags:
+    - composer
+    - base
+
+- name: Remove composer installer
+  file:
+    path: "/tmp/installer.php"
+    state: absent
+  when: composer.stdout == ""
+  tags:
+    - composer
+    - base
+
+- name: Get composer version
+  command: /usr/local/bin/composer -V
+  register: version
+  when: composer.stdout == ""
+  tags:
+    - composer
+    - base
+
+- name: Print composer version
+  debug:
+    msg:
+      - "{{ version.stdout_lines }}"
+  when: composer.stdout == ""
+  tags:
+    - composer
+    - base
+
+- name: Check for Cachet in web directory
+  stat:
+    path: /var/www/Cachet
+  register: cachet
+  changed_when: cachet.stat.exists == false
+  tags:
+    - core
+
+# The clone then copy is to preserve idempotence
+
+- name: Clone and Compare Cachet
+  git:
+    repo: https://github.com/cachethq/Cachet.git
+    dest: /home/vagrant/Cachet
+    version: v2.3.15
+  register: git_result
+  changed_when: "git_result.after|default('after') != git_result.before|default('before')"
+  failed_when: >
+    cachet.stat.exists == false
+    and git_result is failed
+  ignore_errors: true
+  tags:
+    - core
+
+- name: Copy Cachet to web directory if needed
+  synchronize:
+    src: /home/vagrant/Cachet
+    dest: /var/www/
+  when: >
+    git_result is changed
+    or cachet.stat.exists == false
+  tags:
+    - core
+
+- name: Copy httpd.conf file
+  copy:
+    src: /etc/ansible/roles/internal/status_page/files/httpd.conf
+    dest: /etc/httpd/conf/{{ ansible_fqdn }}.conf
+  notify: Restart httpd
+  tags:
+    - core
+
+- name: Copy vhost.conf file
+  copy:
+    src: /etc/ansible/roles/internal/status_page/files/vhost.conf
+    dest: /etc/httpd/conf.d/vhost.conf
+  notify: Restart httpd
+  tags:
+    - core
+
+- name: Add Firewall Entry
+  firewalld:
+    zone: public
+    permanent: true
+    service: http
+    state: enabled
+  when: startservices is not defined or startservices is not failed
+  notify: Restart firewalld
+  tags:
+    - core
+    - base

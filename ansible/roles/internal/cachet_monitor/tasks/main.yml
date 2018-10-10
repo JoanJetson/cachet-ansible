@@ -1,0 +1,10 @@
+---
+# - import_tasks: install_packages.yml
+#   tags:
+#     - monitor
+#     - initial
+
+- import_tasks: cachet_monitor.yml
+  tags:
+    - monitor
+    - initial

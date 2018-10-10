@@ -1,0 +1,95 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+ansible_home = ENV['ANSIBLE_HOME'] || ansible_home = File.expand_path('../..')
+
+Vagrant.configure("2") do |config|
+  config.vm.define "cachet" do |cachet|
+    cachet.vm.provider :virtualbox do |v|
+      v.customize ["modifyvm", :id, "--memory", 512]
+      v.customize ["modifyvm", :id, "--name", "cachet"]
+    end
+    cachet.env.enable
+    cachet.vm.box = "centos/7"
+    cachet.vm.network :forwarded_port, guest: 80, host: 8080
+    cachet.vm.network :forwarded_port, guest: 443, host: 8443
+    cachet.vm.network :private_network, ip: "10.0.0.10"
+
+    # A vagrant plugin called 'vagrant-reload' is required to disable selinux
+    # This will make sure the plugin is installed. Wierd things can happen if it isn't installed
+
+    required_plugins = %w(vagrant-reload)
+    plugins_to_install = required_plugins.select { |plugin| not Vagrant.has_plugin? plugin }
+    if not plugins_to_install.empty?
+      puts "Installing plugins: #{plugins_to_install.join(' ')}"
+      if system "vagrant plugin install #{plugins_to_install.join(' ')}"
+        exec "vagrant #{ARGV.join(' ')}"
+      else
+        abort "Installation of one or more plugins has failed. Aborting."
+      end
+    end
+
+    cachet.vm.provision "Disable selinux",
+      type: "shell",
+      inline: "sudo sed -i 's/enforcing/disabled/g' /etc/selinux/config /etc/selinux/config",
+      run: "once"
+
+    cachet.vm.provision "Reload",
+      type: :reload,
+      run: "once"
+
+    cachet.vm.provision "Remove old files",
+      type: "shell",
+      run: "always",
+      inline: "
+        sudo touch /var/log/ansible.log && sudo chown vagrant:root /var/log/ansible.log ;
+        sudo rm -rf /etc/ansible /tmp/ansible ;"
+
+    cachet.vm.provision "Copy ansible",
+      type: "file",
+      run: "always",
+      source: "#{ansible_home}",
+      destination: "/tmp/"
+
+    cachet.vm.provision "Copy ansible from tmp",
+      type: "shell",
+      run: "always",
+      inline: "mv /tmp/ansible /etc/ansible"
+
+    cachet.vm.provision "status-page-base",
+      run: "never",
+      type:'ansible_local' do |ansible|
+        ansible.install = true
+        ansible.provisioning_path = "/etc/ansible"
+        ansible.playbook = "plays/status_page.yml"
+        ansible.tags = "base"
+      end
+
+    cachet.vm.provision "status-page-core",
+      run: "never",
+      type:'ansible_local' do |ansible|
+        ansible.install = true
+        ansible.provisioning_path = "/etc/ansible"
+        ansible.playbook = "plays/status_page.yml"
+        ansible.tags = "core"
+      end
+
+    cachet.vm.provision "status-page-setup",
+      run: "never",
+      type:'ansible_local' do |ansible|
+        ansible.install = true
+        ansible.provisioning_path = "/etc/ansible"
+        ansible.playbook = "plays/status_page.yml"
+        ansible.skip_tags = "base,core"
+      end
+
+    cachet.vm.provision "status-page-full",
+      run: "never",
+      type:'ansible_local' do |ansible|
+        ansible.install = true
+        ansible.provisioning_path = "/etc/ansible"
+        ansible.playbook = "plays/status_page.yml"
+      end
+    cachet.vm.post_up_message = "Status page box should be created"
+  end
+end

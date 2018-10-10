@@ -1,0 +1,4 @@
+---
+# cachet_hostname: 10.0.0.10
+env: "dev"
+api_key: "APIKEYNOTSET"

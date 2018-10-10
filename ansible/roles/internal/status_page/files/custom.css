@@ -1,0 +1,54 @@
+/* Make success alert banner have happy colors as a animated gradient */
+.alert.alert-success { 
+    color: black;
+    text-align: center;
+    border: 1px solid #e8e8e8;
+    background: linear-gradient(124deg, #1de840, #1ddde8, #2b1de8, #dd00f3, #dd00f3);
+    background-size: 1800% 1800%;
+
+    -webkit-animation: rainbow 120s ease infinite;
+    -z-animation: rainbow 120s ease infinite;
+    -o-animation: rainbow 120s ease infinite;
+    animation: rainbow 120s ease infinite;
+}
+
+/* Make error alert banner have angry colors as a animated gradient */
+.alert.alert-info  { 
+    color: black;
+    text-align: center;
+    border: 1px solid #e8e8e8;
+    background: linear-gradient(124deg, #e91e63, #f44336, #ff5722, #ffeb3b, #ff9800, #ffeb3b);
+    background-size: 1800% 1800%;
+
+    -webkit-animation: rainbow 120s ease infinite;
+    -z-animation: rainbow 120s ease infinite;
+    -o-animation: rainbow 120s ease infinite;
+    animation: rainbow 120s ease infinite;
+}
+
+@-webkit-keyframes rainbow {
+    0%{background-position:0% 82%}
+    50%{background-position:100% 19%}
+    100%{background-position:0% 82%}
+}
+@-moz-keyframes rainbow {
+    0%{background-position:0% 82%}
+    50%{background-position:100% 19%}
+    100%{background-position:0% 82%}
+}
+@-o-keyframes rainbow {
+    0%{background-position:0% 82%}
+    50%{background-position:100% 19%}
+    100%{background-position:0% 82%}
+}
+@keyframes rainbow { 
+    0%{background-position:0% 82%}
+    50%{background-position:100% 19%}
+    100%{background-position:0% 82%}
+}
+
+*, :after, :before, body.status-page img, input[type=checkbox], input[type=radio], input[type=search] {
+    box-sizing: border-box;
+    margin-left: auto;
+    margin-right: auto;
+}

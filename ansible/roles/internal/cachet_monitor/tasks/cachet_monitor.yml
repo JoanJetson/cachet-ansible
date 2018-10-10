@@ -1,0 +1,143 @@
+---
+
+# https://docs.cachethq.io/docs/addons
+
+- name: Download cachet-monitor
+  become: true
+  get_url:
+    url: https://github.com/CastawayLabs/cachet-monitor/releases/download/v3.0/cachet_monitor_linux_amd64
+    dest: /usr/local/bin/cachet-monitor
+    mode: 0755
+
+- name: Copy cachet-monitor config
+  become: true
+  copy:
+    src: /etc/ansible/roles/internal/cachet_monitor/files/cachet-monitor.config.{{ env }}.yml
+    dest: /etc/cachet-monitor.config.yml
+
+#################################################
+# Replace the CACHETHOSTNAME in the config file
+#################################################
+
+- name: Check for hostname in monitor config
+  become: true
+  shell: 'grep CACHETHOSTNAME /etc/cachet-monitor.config.yml | wc -l'
+  register: hostname_set
+
+- name: CACHETHOSTNAME detected
+  debug:
+    msg:
+      - "Detected: {{ hostname_set.stdout }}"
+      - "Hostname to set as: {{ cachet_hostname }}"
+  when: hostname_set.stdout == "1"
+
+- name: Replace hostname in cachet-monitor.config.yml
+  lineinfile:
+    dest: /etc/cachet-monitor.config.yml
+    regexp: '.*CACHETHOSTNAME.*'
+    line: "  url: http://{{ cachet_hostname }}/api/v1"
+    backrefs: yes
+  when: hostname_set.stdout == "1"
+
+- name: Check for CACHETHOSTNAME in monitor config
+  become: true
+  shell: 'grep TOKENNOTSET /etc/cachet-monitor.config.yml | wc -l'
+  when: hostname_set.stdout == "1"
+
+- name: CACHETHOSTNAME detected
+  debug:
+    msg: "{{ hostname_set.stdout }}"
+  when: hostname_set.stdout == "1"
+
+#################################################
+# Replace the APIKEYNOTSET in the config file
+# The commented out lines are for pulling api key
+# when ran on the cachet host
+# I need to mention that I am using curl in shell
+# commands because I couldn't get the uri method
+# to work.
+#################################################
+
+- name: Check for TOKENNOTSET in monitor config
+  become: true
+  shell: 'grep TOKENNOTSET /etc/cachet-monitor.config.yml | wc -l'
+  register: token_set
+
+- name: TOKENNOTSET detected
+  debug:
+    msg: "{{ token_set.stdout }}"
+  when: token_set.stdout == "1"
+
+- name: Authenticate and get cookie
+  shell: curl -X POST -c /tmp/.cookie.txt -k 'http://{{ cachet_hostname }}/auth/login' --data "username=admin&password=password" 
+  args:
+    warn: false
+  register: curl_output
+  when: token_set.stdout == "1"
+  ignore_errors: true
+
+- name: Get admin user API key
+  shell: curl -s -X GET -b /tmp/.cookie.txt -k 'http://{{ cachet_hostname }}/dashboard/user' | grep api_key | sed -E 's/.*name=\"api_key\".*value\=\"(.*)\">/\1/g'
+  args:
+    warn: false
+  register: admin_api_key
+  when: token_set.stdout == "1" and 'FAILED' not in curl_output.stderr
+
+- name: Remove cookie file
+  file:
+    path: /tmp/.cookie.txt
+    state: absent
+  when: token_set.stdout == "1" and 'FAILED' not in curl_output.stderr
+
+- name: Admin api_key from  curl
+  debug:
+    msg: "Admin API key: {{ admin_api_key.stdout }}"
+  when: token_set.stdout == "1" and 'FAILED' not in curl_output.stderr
+
+- name: Replace token in cachet-monitor.config.yml
+  lineinfile:
+    dest: /etc/cachet-monitor.config.yml
+    regexp: '.*TOKENNOTSET.*'
+    line: "  token: {{ admin_api_key.stdout }}"
+    backrefs: yes
+  when: token_set.stdout == "1" and 'FAILED' not in curl_output.stderr
+
+- name: Check for token in monitor config
+  become: true
+  shell: 'grep TOKENNOTSET /etc/cachet-monitor.config.yml | wc -l'
+  when: token_set.stdout == "1" and 'FAILED' not in curl_output.stderr
+  register: token_set
+
+- name: TOKENNOTSET detected
+  debug:
+    msg: "{{ token_set.stdout }}"
+
+- name: Copy cachet-monitor.service
+  become: true
+  copy:
+    src: /etc/ansible/roles/internal/cachet_monitor/files/cachet-monitor.service
+    dest: /etc/systemd/system/cachet-monitor.service
+  register: monitor
+
+- name: reload systemd
+  become: true
+  command: systemctl daemon-reload
+  when: monitor is changed
+
+- name: enable service httpd and ensure it is not masked
+  become: true
+  systemd:
+    name: cachet-monitor.service
+    enabled: yes
+
+- name: enable cachet-monitor.service via systemctl
+  shell: systemctl enable cachet-monitor.service
+  when: ansible_connection == 'docker'
+
+- name: Start cachet-monitor.service via service
+  become: true
+  service:
+    name: cachet-monitor.service
+    state: started
+  when: ansible_connection != 'docker'
+  ignore_errors: true

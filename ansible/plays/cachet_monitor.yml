@@ -1,0 +1,8 @@
+---
+- name: cachet_monitor play start
+  hosts: all
+  become: true
+  become_method: sudo
+
+  roles:
+    - cachet_monitor

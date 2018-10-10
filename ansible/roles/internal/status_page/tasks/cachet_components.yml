@@ -1,0 +1,117 @@
+---
+- name: Set global facts for the components and metrics
+  set_fact:
+    envs:
+      - name: Google
+        group_id: "1"
+        sites:
+          - name: "google.com"
+            address: "google.com"
+            id: "1"
+          - name: "goo.gl"
+            address: "goo.gl"
+            id: "2"
+      - name: Reddit
+        group_id: "2"
+        sites:
+          - name: "Reddit Homepage"
+            address: "reddit.com"
+            id: "3"
+
+################################################################
+# Component Groups
+################################################################
+
+- name: Set facts for Add component_group
+  set_fact:
+    date: "{{ ansible_date_time.date }} {{ ansible_date_time.time}}"
+    table: "component_groups"
+    collapsed: "0"
+  # collapsed = 2 = "Collapse the group, but expand if there are issues"
+
+- name: PSQL - Add component_group
+  become: true
+  command: >-
+    psql -c "INSERT into {{ table }}
+    (id,name,created_at,updated_at,collapsed) SELECT
+    '{{ item.group_id }}', '{{ item.name }}','{{ date }}','{{ date }}','{{ collapsed }}'
+    where not exists ( select name from {{ table }} where name = '{{ item.name }}' and id = '{{ item.group_id }}' )" -d cachet_data -U postgres
+  with_items:
+    - "{{ envs }}"
+  ignore_errors: true
+
+################################################################
+# Components
+################################################################
+
+- name: Set facts for Add components
+  set_fact:
+    date: "{{ ansible_date_time.date }} {{ ansible_date_time.time}}"
+    table: "components"
+    status: "1"
+    group_id: "1"
+    enabled: "t"
+
+- name: PSQL - Add component
+  become: true
+  command: >-
+    psql -c "INSERT into {{ table }}
+    (id,name,description,link,status,\"order\",group_id,created_at,updated_at,enabled) SELECT
+    '{{ item.1.id }}','{{ item.1.name }}','{{ item.1.address }}','https://{{ item.1.address }}','{{ status }}','{{ item.1.id }}','{{ item.0.group_id }}','{{ date }}','{{ date }}','{{ enabled }}'
+    where not exists ( select name from {{ table }} where name = '{{ item.1.name }}' and id = '{{ item.1.id }}' )" -d cachet_data -U postgres
+  with_subelements:
+    - "{{ envs }}"
+    - sites
+  ignore_errors: true
+
+################################################################
+# Component Tags
+################################################################
+
+- name: Set facts for Add component_tag
+  set_fact:
+    table: "component_tag"
+    tag_id: "1"
+
+- name: PSQL - Add component tags
+  become: true
+  command: >-
+    psql -c "INSERT into {{ table }}
+    (id,component_id,tag_id) SELECT
+    '{{ item.1.id }}','{{ item.1.id }}','{{ tag_id }}'
+    where not exists ( select id from {{ table }} where id = '{{ item.1.id }}' )" -d cachet_data -U postgres
+  with_subelements:
+    - "{{ envs }}"
+    - sites
+  ignore_errors: true
+
+################################################################
+# Metrics
+################################################################
+
+- name: Set facts for Add metrics
+  set_fact:
+    date: "{{ ansible_date_time.date }} {{ ansible_date_time.time}}"
+    table: "metrics"
+    name: "Get 200"
+    suffix: "Ping Time"
+    description: "Checks time. See cachet-monitor.yml"
+    default_value: "0.000"
+    calc_type: "1"
+    display_chart: "t"
+    places: "0"
+    default_view: "0"
+    threshold: "5"
+    order: "0"
+
+- name: PSQL - Add metric
+  become: true
+  command: >-
+    psql -c "INSERT into {{ table }}
+    (id,name,suffix,description,default_value,calc_type,display_chart,created_at,updated_at,places,default_view,threshold,\"order\") SELECT
+    '{{ item.1.id }}','{{ item.1.name }}','{{ suffix }}','{{ description }}','{{ default_value }}','{{ calc_type }}','{{ display_chart }}','{{ date }}','{{ date }}','{{ places }}','{{ default_view }}','{{ threshold }}','{{ order }}'
+    where not exists ( select name from {{ table }} where name = '{{ item.1.name }}' and id = '{{ item.1.id }}' )" -d cachet_data -U postgres
+  with_subelements:
+    - "{{ envs }}"
+    - sites
+  ignore_errors: true

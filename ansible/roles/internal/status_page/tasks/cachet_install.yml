@@ -1,0 +1,257 @@
+---
+################################################################################
+# Cachet does not have an .env file by default. For setup, their documentation
+# says to copy .env.example to .env and modify it. I have several modificaitons
+# so it is easier to just copy the env_pgsql file over
+# Checking for it makes dealing with the APP_KEY section easier
+################################################################################
+
+- name: Check for env file
+  stat:
+    path: /var/www/Cachet/.env
+  register: env_file
+  changed_when: env_file.stat.exists == false
+  tags:
+    - core
+
+- name: Get cachet app key
+  command: 'grep "APP_KEY" /var/www/Cachet/.env'
+  register: app_key_value
+  changed_when: false
+  when: env_file.stat.exists == true
+  tags:
+    - core
+
+- name: Copy .env
+  copy:
+    src: /etc/ansible/roles/internal/status_page/files/env
+    dest: /var/www/Cachet/.env
+  register: r2
+  when: >
+    env_file.stat.exists == false
+    or app_key_value.stdout == "APP_KEY="
+  notify: Restart httpd
+  tags:
+    - core
+
+################################################################################
+# These files has to exist for artisan commands. I check for it because
+# sometimes the files can disapear. This is caused by magic grimlins that
+# spawn when running ansible more than once.
+################################################################################
+
+- name: Check for bootstrap autoload.php
+  stat:
+    path: /var/www/Cachet/vendor/autoload.php
+  register: new_install
+  changed_when: new_install.stat.exists == false
+  tags:
+    - core
+
+- name: Check for boostrap services.php
+  stat:
+    path: /var/www/Cachet/bootstrap/cache/services.php
+  register: artisan_bootstrap_file
+  changed_when: artisan_bootstrap_file.stat.exists == false
+  tags:
+    - core
+
+################################################################################
+# I think this takes care of fixing some of the aformentioned grimlins
+################################################################################
+
+- name: Artisan optimize
+  become: true
+  command: "php artisan optimize"
+  args:
+    chdir: /var/www/Cachet
+  when: >
+    artisan_bootstrap_file is defined
+    and new_install is not defined
+  tags:
+    - core
+
+- name: Composer install
+  composer:
+    command: install
+    working_dir: /var/www/Cachet
+    no_dev: true
+  notify: Restart httpd
+  tags:
+    - core
+
+################################################################################
+# So the APP_KEY in the .env file is very important. If it isn't set, you will
+# get a 500 error (or worse) trying to load the page. It's important to not
+# overwrite an existing app key because then all encrypted data will be lost
+# Also imporant that a second key isn't set after the existing one.
+################################################################################
+
+- name: Get cachet app key
+  command: 'grep "APP_KEY" /var/www/Cachet/.env'
+  register: app_key_value
+  changed_when: false
+  tags:
+    - core
+
+- debug:
+    msg:
+      - "{{ app_key_value.stdout }}"
+  tags:
+    - core
+
+- name: PHP artisan key generate
+  command: php artisan key:generate
+  args:
+    chdir: /var/www/Cachet
+  when: app_key_value.stdout == "APP_KEY="
+  register: key_generate
+  tags:
+    - core
+
+- debug:
+    msg:
+      -"{{ key_generate.stdout }}"
+  when: app_key_value.stdout == "APP_KEY="
+  tags:
+    - core
+
+- name: PHP artisan migrate
+  become: true
+  command: php artisan migrate --force
+  register: migrate_result
+  changed_when: "migrate_result.stdout != 'Nothing to migrate.'"
+  args:
+    chdir: /var/www/Cachet
+  notify: Restart httpd
+  tags:
+    - core
+
+################################################################################
+# Fixes 500 error cause apache can't access the directory
+# I have it using this creepy command for idempotency
+################################################################################
+
+- name: Check/Fix /var/www apache ownership
+  become: true
+  command: >
+    find /var/www/
+    ! -user apache
+    ! -path "*Cachet/vendor*"
+    ! -path "*Cachet/bootstrap/cache*"
+    ! -path "*Cachet/database/backups/*"
+    -exec chown apache:apache {} \;
+    -exec echo \"{}\" \;
+  register: www_perms
+  changed_when: www_perms.stdout != ""
+  notify: Restart httpd
+  tags:
+    - core
+
+- name: Check bootstrap cache owner
+  command: stat -c '%U' /var/www/Cachet/bootstrap/cache
+  register: bootstrap_owner
+  changed_when: bootstrap_owner.stdout != "apache"
+  tags:
+    - core
+
+################################################################################
+# This resolves 500 issue. The cache folder ends up being owned by root
+################################################################################
+
+- name: Remove and add bootstrap cache folder
+  file:
+    state: "{{ item }}"
+    path: "/var/www/Cachet/bootstrap/cache"
+    owner: apache
+    group: apache
+  with_items:
+    - absent
+    - directory
+  register: bootstrap_cachet_removed
+  when: >
+    bootstrap_owner is defined
+    and bootstrap_owner.stdout != "apache"
+  tags:
+    - core
+
+################################################################################
+# This resolves an issue were you get a 500 response when trying to acces setup
+# Check for ownership preserves idempotency (kind of). I forsee there being
+# some issues with these either being run with 'become' or not.
+# Should be good for now.
+################################################################################
+
+- name: Check storage owner
+  command: stat -c '%a' /var/www/Cachet/storage
+  register: storage_perms
+  changed_when: storage_perms.stdout != "777"
+  tags:
+    - core
+
+- name: Change permissions for web storage
+  file:
+    path: /var/www/Cachet/storage
+    state: directory
+    recurse: true
+    mode: 0777
+  notify: Restart httpd
+  when: storage_perms.stdout != "777"
+  tags:
+    - core
+
+- name: PHP artisan app install
+  become: true
+  command: php artisan app:install
+  changed_when: false
+  args:
+    chdir: /var/www/Cachet
+  tags:
+    - core
+
+################################################################################
+# Fixing this last resolves the issue were the setup page is all that loads.
+# It will let you setup, but the second time through it errors.
+# I believe this occurs after artisan app install since it creates
+# /var/www/Cachet/bootstrap/cachet as root
+# Note: bootstrap/cache permissions have to be changed before artisan install
+# If you get the setup page a second time, change the permissions, and it
+# will prompt you for credentials.
+# It's also worth mentioning that if you try to check the logs, you'll see
+# errors from postgres, cause it's trying to submit the setup info again.
+################################################################################
+
+- name: Check bootstrap cachet owner
+  command: stat -c '%U' /var/www/Cachet/bootstrap/cachet
+  register: bootstrap_cachet_owner
+  changed_when: bootstrap_cachet_owner.stdout != "apache"
+  tags:
+    - core
+
+- name: Change permissions for bootstrap cachet folder
+  file:
+    path: /var/www/Cachet/bootstrap/cachet
+    state: directory
+    owner: apache
+    group: apache
+    recurse: true
+  notify: Restart httpd
+  when: bootstrap_cachet_owner.stdout != "apache"
+  tags:
+    - core
+
+- name: Execute outstanding handlers
+  meta: flush_handlers
+
+################################################################################
+# This key will be needed by the monitor to be able to post data
+################################################################################
+
+- name: Get cachet API key
+  become: true
+  shell: psql -t -c "SELECT trim( leading from api_key ) from users where username = 'admin'" -d cachet_data -U postgres
+  register: api_key
+
+- name: Display api key
+  debug:
+    msg: "{{ api_key.stdout | replace(' ', '') }}"

@@ -1,0 +1,46 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+ansible_home = ENV['ANSIBLE_HOME'] || ansible_home = File.expand_path('../..')
+
+Vagrant.configure("2") do |config|
+  config.vm.define "cachetmonitor" do |cachetmonitor|
+    cachetmonitor.vm.provider :virtualbox do |v|
+      v.customize ["modifyvm", :id, "--memory", 512]
+      v.customize ["modifyvm", :id, "--name", "cachetmonitor"]
+    end
+    cachetmonitor.env.enable
+    cachetmonitor.vm.box = "centos/7"
+    cachetmonitor.vm.network :forwarded_port, guest: 80, host: 8081
+    cachetmonitor.vm.network :forwarded_port, guest: 443, host: 8444
+    cachetmonitor.vm.network :private_network, ip: "10.0.0.11"
+
+    cachetmonitor.vm.provision "Remove old files",
+      type: "shell",
+      run: "always",
+      inline: "sudo rm -rf /tmp/ansible /etc/ansible"
+
+    cachetmonitor.vm.provision "Copy ansible",
+      type: "file",
+      run: "always",
+      source: "#{ansible_home}",
+      destination: "/tmp/"
+
+    cachetmonitor.vm.provision "Copy ansible from tmp",
+      type: "shell",
+      run: "always",
+      inline: "mv /tmp/ansible /etc/ansible"
+
+    cachetmonitor.vm.provision "status-page-monitor",
+      run: "never",
+      type:'ansible_local' do |ansible|
+        ansible.install = true
+        ansible.provisioning_path = "/etc/ansible"
+        ansible.playbook = "plays/cachet_monitor.yml"
+        ansible.extra_vars = {  
+          cachet_hostname: "10.0.0.10"
+        }
+      end
+    config.vm.post_up_message = "Monitor box should be created"
+  end
+end

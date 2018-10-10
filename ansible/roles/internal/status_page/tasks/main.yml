@@ -1,0 +1,25 @@
+---
+- import_tasks: install_packages.yml
+  tags:
+    - frontend
+    - initial
+- import_tasks: cachet_database_setup.yml
+  tags:
+    - frontend
+    - initial
+- import_tasks: cachet_install.yml
+  tags:
+    - frontend
+    - initial
+- import_tasks: cachet_setup.yml
+  tags:
+    - frontend
+    - initial
+- import_tasks: cachet_interface.yml
+  tags:
+    - frontend
+    - customize
+- import_tasks: cachet_components.yml
+  tags:
+    - customize
+    - monitor

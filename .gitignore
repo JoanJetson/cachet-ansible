@@ -1,0 +1,43 @@
+hosts
+roles/external/*
+!roles/external/README.md
+
+# ansible
+*.retry
+
+# vagrant
+.vagrant/
+*.box
+.env
+
+# generated Python bytecode
+*.pyc
+
+# bundler
+.bundle/
+vendor/
+
+# test kitchen artifacts
+.kitchen/
+.kitchen.local.yml
+
+# ignore the vagrant base box
+*.box
+
+# terraform files
+.terraform
+*.terraform
+terraform.tfstate
+terraform.tfvars
+*.tfstate*
+*.plan
+*.swp
+*.tfstate.backup
+.DS_Store
+*.tfplan
+
+# external git repos
+*docker-systemctl-replacement*
+
+# don't save cookie files
+*cookie.txt*

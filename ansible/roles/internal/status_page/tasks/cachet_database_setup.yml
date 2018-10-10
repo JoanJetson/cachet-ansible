@@ -1,0 +1,268 @@
+---
+- name: PgSQL - Check if database initialized
+  stat:
+    path: /var/lib/pgsql/data/postgresql.conf
+  register: initialize_postgres
+  changed_when: initialize_postgres.stat.exists == false
+  tags:
+    - postgresql
+    - core
+
+- name: PgSQL - Initiate database
+  become: true
+  command: postgresql-setup initdb
+           creates=/var/lib/pgsql/data/postgresql.conf
+  register: postgres_init
+  ignore_errors: true
+  tags:
+    - postgresql
+    - core
+
+- name: PgSQL - Enable service and ensure not masked
+  become: true
+  systemd:
+    name: postgresql
+    enabled: yes
+    masked: no
+  tags:
+    - postgresql
+    - core
+
+- name: PgSQL - Start service
+  become: true
+  service:
+    name: postgresql
+    state: started
+  ignore_errors: true
+  register: pgsqlstart
+  tags:
+    - postgresql
+    - core
+
+- name: PgSQL - Start service with systemctl
+  shell: systemctl start postgresql.service
+  when: pgsqlstart is failed
+  tags:
+    - postgresql
+    - core
+
+- name: PgSQL - Copy pg_hba.conf
+  become: true
+  copy:
+    src: /etc/ansible/roles/internal/status_page/files/pg_hba.conf
+    dest: /var/lib/pgsql/data/pg_hba.conf
+  register: postgres_restart
+  tags:
+    - postgresql
+    - core
+
+- name: PgSQL - Restart postgres
+  service:
+    name: postgresql
+    state: restarted
+  when: >
+    postgres_restart.changed == true
+    and pgsqlstart is  not failed
+  tags:
+    - postgresql
+    - core
+
+- name: PgSQL - Restart postgres with systemctl
+  shell: systemctl restart postgresql.service
+  when: >
+    postgres_restart.changed == true
+    and pgsqlstart is failed
+  tags:
+    - postgresql
+    - core
+
+- name: PgSQL - Ensure database is created
+  become: true
+  become_user: postgres
+  postgresql_db:
+    name: cachet_data
+    state: present
+  tags:
+    - postgresql
+    - core
+
+- name: PgSQL - Ensure user has access to the database
+  become: true
+  become_user: postgres
+  postgresql_user:
+    db: cachet_data
+    name: cachet_user
+    password: "{{ mysql_root_password }}"
+    priv: ALL
+    state: present
+  tags:
+    - postgresql
+    - core
+
+- name: PgSQL - Remove unnecessary user privileges
+  become: true
+  become_user: postgres
+  postgresql_user:
+    name: cachet_user
+    role_attr_flags: NOSUPERUSER,NOCREATEDB
+    state: present
+  tags:
+    - postgresql
+    - core
+
+#############
+#   MySQL   #
+#############
+
+# - name: MySQL - Enable service and ensure not masked
+#   become: true
+#   systemd:
+#     name: mariadb
+#     enabled: yes
+#     masked: no
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# - name: MySQL - Start service
+#   become: true
+#   service:
+#     name: mariadb
+#     state: started
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# # Ansible mysql_secure_installation playbook
+# - name: MySQL - Change root user password on first run
+#   mysql_user:
+#     login_user: root
+#     login_password: "{{ mysql_root_password }}"
+#     check_implicit_admin: yes
+#     name: root
+#     password: "{{ mysql_root_password }}"
+#     priv: '*.*:ALL,GRANT'
+#     host: "{{ item }}"
+#   with_items:
+#     - "{{ ansible_nodename }}"
+#     - 127.0.0.1
+#     - ::1
+#     - localhost
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# - name: MySQL - Deletes anonymous db server user for ansible_fqdn
+#   mysql_user:
+#     user: ""
+#     login_user: root
+#     login_password: "{{ mysql_root_password }}"
+#     host: "{{ ansible_fqdn }}"
+#     state: "absent"
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# - name: MySQL - Deletes anonymous db server user for localhost
+#   mysql_user:
+#     user: ""
+#     login_user: root
+#     login_password: "{{ mysql_root_password }}"
+#     state: "absent"
+#     password: "{{ mysql_root_password }}"
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# - name: MySQL - Secures the db root user for IPV6 localhost (::1)
+#   mysql_user:
+#     user: "root"
+#     login_user: root
+#     login_password: "{{ mysql_root_password }}"
+#     host: "::1"
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# - name: MySQL - Secures the db root user for IPV4 localhost (127.0.0.1)
+#   mysql_user:
+#     user: "root"
+#     login_user: root
+#     login_password: "{{ mysql_root_password }}"
+#     host: "127.0.0.1"
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# - name: MySQL - Secures the db root user for localhost domain (localhost)
+#   mysql_user:
+#     user: "root"
+#     login_user: root
+#     login_password: "{{ mysql_root_password }}"
+#     host: "localhost"
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# - name: MySQL - Secures the db root user for server_hostname domain
+#   mysql_user:
+#     user: "root"
+#     login_user: root
+#     login_password: "{{ mysql_root_password }}"
+#     host: "{{ ansible_fqdn }}"
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# - name: MySQL - Removes the db test database
+#   mysql_db:
+#     login_user: root
+#     login_password: "{{ mysql_root_password }}"
+#     db: test
+#     state: absent
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# - name: MySQL - Create a new database with name 'cachet_data'
+#   mysql_db:
+#     name: cachet_data
+#     state: present
+#     login_password: "{{ mysql_root_password }}"
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# - name: MySQL - Create db user with name 'cachet_user'
+#   mysql_user:
+#     name: cachet_user
+#     password: "{{ mysql_root_password }}"
+#     login_password: "{{ mysql_root_password }}"
+#     priv: 'cachet_data.*:ALL/*.*:SUPER,RELOAD,SHOW DATABASES'
+#     state: present
+#   register: cachet_user
+#   when: mariadb is defined
+#   tags:
+#     - mariadb
+#     - core
+
+# - name: MySQL - Flush db privileges table
+#   shell: echo 'FLUSH PRIVILEGES;'\|mysql -u root mysql -login_password="{{ mysql_root_password }}"
+#   when: mariadb is defined and cachet_user.changed
+#   tags:
+#     - mariadb
+#     - core
+
+- name: force all notified handlers to run at this point, not waiting for normal sync points
+  meta: flush_handlers
